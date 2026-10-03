@@ -1,3 +1,4 @@
+```yaml
 name: CI/CD
 
 on:
@@ -5,30 +6,134 @@ on:
     branches:
       - master
 
+  pull_request:
+    branches:
+      - master
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/my-project
+
 jobs:
-  deploy:
+
+  # -------------------------
+  # CI
+  # -------------------------
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Backend tests
+        working-directory: server
+        run: |
+          echo "Run backend tests here"
+          # pip install -r requirements.txt
+          # pytest
+
+      - name: Frontend tests
+        working-directory: client
+        run: |
+          echo "Run frontend tests here"
+          # npm ci
+          # npm test -- --watchAll=false
+
+
+  # -------------------------
+  # Build Docker images
+  # -------------------------
+  build:
+    name: Build Docker Images
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }} \
+            -t ${{ env.IMAGE_PREFIX }}-backend:latest \
+            ./server
+
+      - name: Build frontend
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }} \
+            -t ${{ env.IMAGE_PREFIX }}-frontend:latest \
+            ./client
+
+      - name: Push backend
+        run: |
+          docker push ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}-backend:latest
+
+      - name: Push frontend
+        run: |
+          docker push ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}-frontend:latest
+
+
+  # -------------------------
+  # Deploy to VPS
+  # -------------------------
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
-      - name: Add VPS to known_hosts
+      - name: Add VPS to known hosts
         run: |
           ssh-keyscan -H 169.58.201.189 >> ~/.ssh/known_hosts
 
-      - name: Deploy to VPS
+      - name: Deploy
         run: |
           ssh root@169.58.201.189 << 'EOF'
+
             cd /root/my-project
 
-            git pull origin master
+            echo "Logging into GHCR..."
 
-            docker compose down
-            docker compose up -d --build
+            echo "${{ secrets.GHCR_TOKEN }}" | \
+              docker login ghcr.io \
+              -u "${{ github.actor }}" \
+              --password-stdin
+
+            echo "Pulling new images..."
+
+            docker compose pull
+
+            echo "Starting application..."
+
+            docker compose up -d
+
+            echo "Cleaning unused images..."
+
+            docker image prune -f
+
           EOF
+```
