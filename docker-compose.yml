@@ -1,0 +1,22 @@
+services:
+  backend:
+    image: ghcr.io/YOUR_GITHUB_USERNAME/my-project-backend:latest
+    container_name: my-project-backend
+    restart: unless-stopped
+
+    expose:
+      - "8000"
+
+    environment:
+      DJANGO_DEBUG: "False"
+
+  frontend:
+    image: ghcr.io/YOUR_GITHUB_USERNAME/my-project-frontend:latest
+    container_name: my-project-frontend
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+
+    depends_on:
+      - backend

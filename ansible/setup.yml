@@ -1,0 +1,25 @@
+---
+- name: Configure VPS
+  hosts: vps
+  become: true
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - git
+          - curl
+          - nginx
+          - docker.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Enable Docker
+      service:
+        name: docker
+        state: started
