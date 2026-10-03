@@ -9,35 +9,28 @@ on:
     branches:
       - master
 
-  # Allows you to run the workflow manually
-  # without creating a new commit.
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/ecommerce
+  IMAGE_PREFIX: ghcr.io/mariosmpratsos/ecommerce
 
 jobs:
 
-  # ==========================================
-  # CI - TEST
-  # ==========================================
+  # =========================
+  # TEST
+  # =========================
+
   test:
     name: Test
     runs-on: ubuntu-latest
 
     steps:
 
-      # ----------------------------------------
-      # Checkout repository
-      # ----------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
-
-      # ----------------------------------------
       # Backend
-      # ----------------------------------------
       - name: Backend tests
         working-directory: server
         run: |
@@ -45,40 +38,33 @@ jobs:
           pwd
           ls -la
 
-          echo "Run backend tests here"
+          echo "Running backend tests..."
 
-          # If your backend is Node:
+          # Add your backend tests here.
+          # Example for Node:
           # npm ci
           # npm test
 
-          # If your backend is Python:
-          # pip install -r requirements.txt
-          # pytest
-
-
-      # ----------------------------------------
       # Frontend
-      # ----------------------------------------
-      # Frontend is in the ROOT of the repository.
-      - name: Frontend build
+      - name: Frontend tests
         run: |
           echo "Frontend directory:"
           pwd
           ls -la
 
           npm ci
+
+          echo "Building frontend..."
           npm run build
 
 
-  # ==========================================
+  # =========================
   # BUILD DOCKER IMAGES
-  # ==========================================
+  # =========================
+
   build:
     name: Build Docker Images
-
     needs: test
-
-    # Only build images on push, not pull requests
     if: github.event_name == 'push'
 
     runs-on: ubuntu-latest
@@ -89,16 +75,11 @@ jobs:
 
     steps:
 
-      # ----------------------------------------
-      # Checkout
-      # ----------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
 
-      # ----------------------------------------
       # Login to GitHub Container Registry
-      # ----------------------------------------
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -107,9 +88,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
 
-      # ----------------------------------------
-      # Build backend
-      # ----------------------------------------
+      # Backend image
       - name: Build backend image
         run: |
           docker build \
@@ -118,10 +97,7 @@ jobs:
             ./server
 
 
-      # ----------------------------------------
-      # Build frontend
-      # ----------------------------------------
-      # Frontend Dockerfile is in the repository root.
+      # Frontend image
       - name: Build frontend image
         run: |
           docker build \
@@ -130,9 +106,7 @@ jobs:
             .
 
 
-      # ----------------------------------------
       # Push backend
-      # ----------------------------------------
       - name: Push backend image
         run: |
           docker push \
@@ -142,9 +116,7 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-backend:latest
 
 
-      # ----------------------------------------
       # Push frontend
-      # ----------------------------------------
       - name: Push frontend image
         run: |
           docker push \
@@ -154,41 +126,33 @@ jobs:
             ${{ env.IMAGE_PREFIX }}-frontend:latest
 
 
-  # ==========================================
+  # =========================
   # DEPLOY TO VPS
-  # ==========================================
+  # =========================
+
   deploy:
     name: Deploy to VPS
-
     needs: build
-
-    # Only deploy on push to master
     if: github.event_name == 'push'
 
     runs-on: ubuntu-latest
 
     steps:
 
-      # ----------------------------------------
       # Setup SSH
-      # ----------------------------------------
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
 
-      # ----------------------------------------
-      # Trust VPS host
-      # ----------------------------------------
+      # Trust VPS
       - name: Add VPS to known hosts
         run: |
           ssh-keyscan -H 169.58.201.189 >> ~/.ssh/known_hosts
 
 
-      # ----------------------------------------
       # Deploy
-      # ----------------------------------------
       - name: Deploy to VPS
         run: |
           ssh root@169.58.201.189 << 'EOF'
@@ -199,7 +163,6 @@ jobs:
             echo "Starting deployment"
             echo "================================"
 
-            # Go to project directory
             cd /root/my-project
 
             echo "Logging into GHCR..."
@@ -209,21 +172,17 @@ jobs:
               -u "${{ github.actor }}" \
               --password-stdin
 
-
-            echo "Pulling latest Docker images..."
+            echo "Pulling new Docker images..."
 
             docker compose pull
 
-
-            echo "Starting containers..."
+            echo "Starting application..."
 
             docker compose up -d
 
-
-            echo "Removing unused Docker images..."
+            echo "Cleaning unused Docker images..."
 
             docker image prune -f
-
 
             echo "================================"
             echo "Deployment complete"
