@@ -30,7 +30,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Backend
       - name: Backend tests
         working-directory: server
         run: |
@@ -43,7 +42,6 @@ jobs:
           # npm ci
           # npm test
 
-      # Frontend
       - name: Frontend tests
         run: |
           echo "Frontend directory:"
@@ -123,8 +121,9 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null && echo "Key format OK"
           ssh-keyscan -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts
 
       - name: Test SSH connection
