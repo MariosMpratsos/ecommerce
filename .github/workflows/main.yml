@@ -161,7 +161,7 @@ jobs:
             docker compose pull
 
             echo "Starting application..."
-            docker compose up -d
+            docker compose up -d --remove-orphans
 
             echo "Cleaning unused images..."
             docker image prune -f
