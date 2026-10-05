@@ -19,10 +19,6 @@ env:
 
 jobs:
 
-  # =========================
-  # TEST
-  # =========================
-
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -51,10 +47,6 @@ jobs:
           echo "Building frontend..."
           npm run build
 
-
-  # =========================
-  # BUILD DOCKER IMAGES
-  # =========================
 
   build:
     name: Build Docker Images
@@ -104,10 +96,6 @@ jobs:
           docker push ${{ env.IMAGE_PREFIX }}-frontend:latest
 
 
-  # =========================
-  # DEPLOY TO VPS
-  # =========================
-
   deploy:
     name: Deploy to VPS
     needs: build
@@ -135,8 +123,11 @@ jobs:
 
       - name: Prepare server folder and upload compose file
         run: |
-          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "mkdir -p ${{ env.DEPLOY_DIR }}/data"
-          scp -o BatchMode=yes docker-compose.yml root@${{ env.VPS_HOST }}:${{ env.DEPLOY_DIR }}/docker-compose.yml
+          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} \
+            "mkdir -p ${{ env.DEPLOY_DIR }}/data && cd ${{ env.DEPLOY_DIR }} && rm -f docker-compose.yml docker-compose.yaml compose.yml compose.yaml"
+          scp -o BatchMode=yes docker-compose.prod.yml root@${{ env.VPS_HOST }}:${{ env.DEPLOY_DIR }}/docker-compose.prod.yml
+          echo "Uploaded compose file:"
+          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat ${{ env.DEPLOY_DIR }}/docker-compose.prod.yml"
 
       - name: Upload .env
         env:
@@ -158,16 +149,16 @@ jobs:
             cd /root/ecommerce
 
             echo "Pulling new images..."
-            docker compose pull
+            docker compose -f docker-compose.prod.yml pull
 
             echo "Starting application..."
-            docker compose up -d --remove-orphans
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
             echo "Cleaning unused images..."
             docker image prune -f
 
             echo "Running containers:"
-            docker compose ps
+            docker compose -f docker-compose.prod.yml ps
 
             docker logout ghcr.io
           EOF
