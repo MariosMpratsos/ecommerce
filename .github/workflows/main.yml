@@ -80,6 +80,7 @@ jobs:
       - name: Build backend image
         run: |
           docker build \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
             -t ${{ env.IMAGE_PREFIX }}-backend:${{ github.sha }} \
             -t ${{ env.IMAGE_PREFIX }}-backend:latest \
             ./server
@@ -87,6 +88,7 @@ jobs:
       - name: Build frontend image
         run: |
           docker build \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
             -t ${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }} \
             -t ${{ env.IMAGE_PREFIX }}-frontend:latest \
             .
@@ -111,6 +113,10 @@ jobs:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout
@@ -139,16 +145,17 @@ jobs:
           printf '%s\n' "$ENV_FILE" | ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat > ${{ env.DEPLOY_DIR }}/.env && chmod 600 ${{ env.DEPLOY_DIR }}/.env"
 
       - name: Deploy to VPS
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
+          echo "Logging into GHCR on the server..."
+          printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes root@${{ env.VPS_HOST }} \
+            "docker login ghcr.io -u $GHCR_USER --password-stdin"
+
           ssh -o BatchMode=yes root@${{ env.VPS_HOST }} << 'EOF'
             set -e
             cd /root/ecommerce
-
-            echo "Logging into GHCR..."
-            echo "${{ secrets.GHCR_TOKEN }}" | \
-              docker login ghcr.io \
-              -u "${{ github.actor }}" \
-              --password-stdin
 
             echo "Pulling new images..."
             docker compose pull
@@ -161,4 +168,6 @@ jobs:
 
             echo "Running containers:"
             docker compose ps
+
+            docker logout ghcr.io
           EOF
