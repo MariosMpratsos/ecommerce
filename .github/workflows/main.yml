@@ -96,7 +96,7 @@ jobs:
           docker push ${{ env.IMAGE_PREFIX }}-frontend:latest
 
 
-  deploy:
+    deploy:
     name: Deploy to VPS
     needs: build
     if: github.event_name == 'push'
@@ -107,9 +107,6 @@ jobs:
       packages: read
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Set up SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -121,13 +118,29 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null && echo "Key format OK"
           ssh-keyscan -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Prepare server folder and upload compose file
+      - name: Write compose file on server
         run: |
-          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} \
-            "mkdir -p ${{ env.DEPLOY_DIR }}/data && cd ${{ env.DEPLOY_DIR }} && rm -f docker-compose.yml docker-compose.yaml compose.yml compose.yaml"
-          scp -o BatchMode=yes docker-compose.prod.yml root@${{ env.VPS_HOST }}:${{ env.DEPLOY_DIR }}/docker-compose.prod.yml
-          echo "Uploaded compose file:"
-          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat ${{ env.DEPLOY_DIR }}/docker-compose.prod.yml"
+          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "mkdir -p ${{ env.DEPLOY_DIR }}/data ${{ env.DEPLOY_DIR }}/.docker"
+          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat > ${{ env.DEPLOY_DIR }}/docker-compose.prod.yml" << 'EOF'
+          name: ecommerce-shop
+          services:
+            backend:
+              image: ghcr.io/mariosmpratsos/ecommerce-backend:latest
+              restart: unless-stopped
+              ports:
+                - "5001:5001"
+              env_file:
+                - .env
+              volumes:
+                - ./data:/app/data
+            frontend:
+              image: ghcr.io/mariosmpratsos/ecommerce-frontend:latest
+              restart: unless-stopped
+              ports:
+                - "8080:80"
+              depends_on:
+                - backend
+          EOF
 
       - name: Upload .env
         env:
@@ -140,25 +153,15 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
-          echo "Logging into GHCR on the server..."
           printf '%s' "$GHCR_TOKEN" | ssh -o BatchMode=yes root@${{ env.VPS_HOST }} \
-            "docker login ghcr.io -u $GHCR_USER --password-stdin"
+            "DOCKER_CONFIG=${{ env.DEPLOY_DIR }}/.docker docker login ghcr.io -u $GHCR_USER --password-stdin"
 
           ssh -o BatchMode=yes root@${{ env.VPS_HOST }} << 'EOF'
             set -e
             cd /root/ecommerce
-
-            echo "Pulling new images..."
+            export DOCKER_CONFIG=/root/ecommerce/.docker
             docker compose -f docker-compose.prod.yml pull
-
-            echo "Starting application..."
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
-
-            echo "Cleaning unused images..."
-            docker image prune -f
-
-            echo "Running containers:"
+            docker compose -f docker-compose.prod.yml up -d
             docker compose -f docker-compose.prod.yml ps
-
-            docker logout ghcr.io
+            rm -rf /root/ecommerce/.docker
           EOF
