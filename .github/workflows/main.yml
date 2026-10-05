@@ -19,6 +19,10 @@ env:
 
 jobs:
 
+  # =========================
+  # TEST
+  # =========================
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -47,6 +51,10 @@ jobs:
           echo "Building frontend..."
           npm run build
 
+
+  # =========================
+  # BUILD DOCKER IMAGES
+  # =========================
 
   build:
     name: Build Docker Images
@@ -96,7 +104,11 @@ jobs:
           docker push ${{ env.IMAGE_PREFIX }}-frontend:latest
 
 
-    deploy:
+  # =========================
+  # DEPLOY TO VPS
+  # =========================
+
+  deploy:
     name: Deploy to VPS
     needs: build
     if: github.event_name == 'push'
