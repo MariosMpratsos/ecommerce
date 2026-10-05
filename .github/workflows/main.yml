@@ -15,6 +15,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/mariosmpratsos/ecommerce
   VPS_HOST: 169.58.201.189
+  DEPLOY_DIR: /root/ecommerce
 
 jobs:
 
@@ -36,7 +37,6 @@ jobs:
           echo "Backend directory:"
           pwd
           ls -la
-
           echo "Running backend tests..."
           # Add your backend tests here, for example:
           # npm ci
@@ -47,9 +47,7 @@ jobs:
           echo "Frontend directory:"
           pwd
           ls -la
-
           npm ci
-
           echo "Building frontend..."
           npm run build
 
@@ -115,6 +113,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -126,21 +127,22 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null && echo "Key format OK"
           ssh-keyscan -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Test SSH connection
+      - name: Prepare server folder and upload compose file
         run: |
-          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "echo SSH connection OK"
+          ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "mkdir -p ${{ env.DEPLOY_DIR }}/data"
+          scp -o BatchMode=yes docker-compose.yml root@${{ env.VPS_HOST }}:${{ env.DEPLOY_DIR }}/docker-compose.yml
+
+      - name: Upload .env
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          printf '%s\n' "$ENV_FILE" | ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat > ${{ env.DEPLOY_DIR }}/.env && chmod 600 ${{ env.DEPLOY_DIR }}/.env"
 
       - name: Deploy to VPS
         run: |
           ssh -o BatchMode=yes root@${{ env.VPS_HOST }} << 'EOF'
-
             set -e
-
-            echo "================================"
-            echo "Starting deployment"
-            echo "================================"
-
-            cd /root/my-project
+            cd /root/ecommerce
 
             echo "Logging into GHCR..."
             echo "${{ secrets.GHCR_TOKEN }}" | \
@@ -148,19 +150,15 @@ jobs:
               -u "${{ github.actor }}" \
               --password-stdin
 
-            echo "Pulling new Docker images..."
+            echo "Pulling new images..."
             docker compose pull
 
             echo "Starting application..."
             docker compose up -d
 
-            echo "Cleaning unused Docker images..."
+            echo "Cleaning unused images..."
             docker image prune -f
 
-            echo "================================"
-            echo "Deployment complete"
-            echo "================================"
-
+            echo "Running containers:"
             docker compose ps
-
           EOF
