@@ -1,18 +1,22 @@
 services:
-  backend:
-    image: ghcr.io/mariosmpratsos/ecommerce-backend:latest
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
-
   frontend:
-    image: ghcr.io/mariosmpratsos/ecommerce-frontend:latest
-    restart: unless-stopped
-    ports:
-      - "8080:80"
-    depends_on:
-      - backend
+    # Keep your existing settings
+    networks:
+      default: {}
+      mhealth:
+        aliases:
+          - ecommerce-frontend
+
+  backend:
+    # Keep your existing settings
+    networks:
+      default: {}
+      mhealth:
+        aliases:
+          - ecommerce-backend
+
+networks:
+  default:
+  mhealth:
+    external: true
+    name: mhealth_default
