@@ -152,12 +152,20 @@ jobs:
                 - "8080:80"
               depends_on:
                 - backend
+          EOF
 
       - name: Upload .env
         env:
-          ENV_FILE: ${{ secrets.ENV_FILE }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: |
-          printf '%s\n' "$ENV_FILE" | ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat > ${{ env.DEPLOY_DIR }}/.env && chmod 600 ${{ env.DEPLOY_DIR }}/.env"
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "GEMINI_API_KEY secret is empty or missing"; exit 1
+          fi
+          {
+            printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY"
+            if [ -n "$GEMINI_MODEL" ]; then printf 'GEMINI_MODEL=%s\n' "$GEMINI_MODEL"; fi
+          } | ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat > ${{ env.DEPLOY_DIR }}/.env && chmod 600 ${{ env.DEPLOY_DIR }}/.env"
 
       - name: Deploy to VPS
         env:
@@ -172,7 +180,7 @@ jobs:
             cd /root/ecommerce
             export DOCKER_CONFIG=/root/ecommerce/.docker
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker compose -f docker-compose.prod.yml up -d --force-recreate --remove-orphans
             docker compose -f docker-compose.prod.yml ps
             rm -rf /root/ecommerce/.docker
           EOF
