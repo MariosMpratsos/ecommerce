@@ -130,16 +130,17 @@ jobs:
           ssh-keygen -y -f ~/.ssh/id_ed25519 > /dev/null && echo "Key format OK"
           ssh-keyscan -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Write compose file and gateway config on server
+      - name: Write compose file on server
         run: |
           ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "mkdir -p ${{ env.DEPLOY_DIR }}/data ${{ env.DEPLOY_DIR }}/.docker"
-          scp -o BatchMode=yes deploy/nginx.conf root@${{ env.VPS_HOST }}:${{ env.DEPLOY_DIR }}/nginx.conf
           ssh -o BatchMode=yes root@${{ env.VPS_HOST }} "cat > ${{ env.DEPLOY_DIR }}/docker-compose.prod.yml" << 'EOF'
           name: ecommerce-shop
           services:
             backend:
               image: ghcr.io/mariosmpratsos/ecommerce-backend:latest
               restart: unless-stopped
+              ports:
+                - "5001:5000"
               env_file:
                 - .env
               volumes:
@@ -147,17 +148,9 @@ jobs:
             frontend:
               image: ghcr.io/mariosmpratsos/ecommerce-frontend:latest
               restart: unless-stopped
-              depends_on:
-                - backend
-            gateway:
-              image: nginx:1.22.1
-              restart: unless-stopped
               ports:
                 - "8080:80"
-              volumes:
-                - ./nginx.conf:/etc/nginx/nginx.conf:ro
               depends_on:
-                - frontend
                 - backend
           EOF
 
@@ -180,7 +173,7 @@ jobs:
             cd /root/ecommerce
             export DOCKER_CONFIG=/root/ecommerce/.docker
             docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker compose -f docker-compose.prod.yml ps
             rm -rf /root/ecommerce/.docker
           EOF
