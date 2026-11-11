@@ -107,6 +107,14 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
+      - name: Provision server with Ansible
+        run: |
+          pip install ansible
+          printf '[vps]\nserver ansible_host=%s ansible_user=root\n' "$VPS_HOST" > /tmp/inventory.ini
+          ansible-playbook -i /tmp/inventory.ini ansible/setup.yml \
+            --private-key ~/.ssh/id_ed25519 \
+            -e deploy_dir="$DEPLOY_DIR"
+
       - name: Copy docker-compose.yml to server
         run: |
           ssh -o BatchMode=yes root@"$VPS_HOST" "mkdir -p $DEPLOY_DIR/data"
@@ -130,8 +138,16 @@ jobs:
           GHCR_USER: ${{ github.repository_owner }}
           IMAGE_PREFIX: ${{ needs.build.outputs.image_prefix }}
         run: |
-          printf '%s' "$GHCR_PAT" | ssh -o BatchMode=yes root@"$VPS_HOST" \
-            "docker login ghcr.io -u $GHCR_USER --password-stdin"
+          GHCR_USER_LC=$(echo "$GHCR_USER" | tr '[:upper:]' '[:lower:]')
+          TOKEN=$(printf '%s' "$GHCR_PAT" | tr -d '[:space:]')
+
+          if [ -z "$TOKEN" ]; then
+            echo "::error::GHCR_PAT is empty"; exit 1
+          fi
+
+          printf '%s' "$TOKEN" | ssh -o BatchMode=yes root@"$VPS_HOST" \
+            "docker login ghcr.io -u $GHCR_USER_LC --password-stdin" \
+            || { echo "::error::GHCR login denied. Use a CLASSIC token with read:packages."; exit 1; }
 
           ssh -o BatchMode=yes root@"$VPS_HOST" \
             "cd $DEPLOY_DIR && \
