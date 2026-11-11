@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  VPS_HOST: ${{ vars.VPS_HOST }}
+  VPS_HOST: ${{ vars.VPS_HOST || secrets.VPS_HOST }}
   DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/root/ecommerce' }}
 
 jobs:
@@ -94,6 +94,14 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
+          if [ -z "$VPS_HOST" ]; then
+            echo "::error::VPS_HOST is empty. Create it under Settings > Secrets and variables > Actions (Variables or Secrets tab)."
+            exit 1
+          fi
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::SSH_PRIVATE_KEY secret is empty"
+            exit 1
+          fi
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
@@ -109,7 +117,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: |
-          if [ -z "$GEMINI_API_KEY" ]; then echo "GEMINI_API_KEY missing"; exit 1; fi
+          if [ -z "$GEMINI_API_KEY" ]; then echo "::error::GEMINI_API_KEY missing"; exit 1; fi
           {
             printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY"
             if [ -n "$GEMINI_MODEL" ]; then printf 'GEMINI_MODEL=%s\n' "$GEMINI_MODEL"; fi
