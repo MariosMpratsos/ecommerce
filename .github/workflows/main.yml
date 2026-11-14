@@ -11,6 +11,7 @@ env:
   REGISTRY: ghcr.io
   VPS_HOST: ${{ vars.VPS_HOST || secrets.VPS_HOST }}
   DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/root/ecommerce' }}
+  PROXY_CONTAINER: ${{ vars.PROXY_CONTAINER || '' }}
 
 jobs:
   test:
@@ -87,37 +88,38 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-ecommerce
+      cancel-in-progress: false
+    env:
+      IMAGE_PREFIX: ${{ needs.build.outputs.image_prefix }}
+      TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up SSH
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Check required config
         run: |
-          if [ -z "$VPS_HOST" ]; then
-            echo "::error::VPS_HOST is empty. Create it under Settings > Secrets and variables > Actions (Variables or Secrets tab)."
-            exit 1
-          fi
-          if [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "::error::SSH_PRIVATE_KEY secret is empty"
-            exit 1
-          fi
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          [ -n "$VPS_HOST" ] || { echo "::error::VPS_HOST is empty"; exit 1; }
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Trust VPS host key
+        run: |
+          mkdir -p ~/.ssh
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
       - name: Provision server with Ansible
         run: |
-          pip install ansible
-          printf '[vps]\nserver ansible_host=%s ansible_user=root\n' "$VPS_HOST" > /tmp/inventory.ini
+          pipx install ansible
+          printf '[vps]\nserver ansible_host=%s ansible_user=root ansible_python_interpreter=/usr/bin/python3\n' "$VPS_HOST" > /tmp/inventory.ini
           ansible-playbook -i /tmp/inventory.ini ansible/setup.yml \
-            --private-key ~/.ssh/id_ed25519 \
-            -e deploy_dir="$DEPLOY_DIR"
+            -e deploy_dir="$DEPLOY_DIR" \
+            -e proxy_container="$PROXY_CONTAINER"
 
       - name: Copy docker-compose.yml to server
         run: |
-          ssh -o BatchMode=yes root@"$VPS_HOST" "mkdir -p $DEPLOY_DIR/data"
           scp -o BatchMode=yes docker-compose.yml root@"$VPS_HOST":"$DEPLOY_DIR"/docker-compose.yml
 
       - name: Upload .env
@@ -125,34 +127,49 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: |
-          if [ -z "$GEMINI_API_KEY" ]; then echo "::error::GEMINI_API_KEY missing"; exit 1; fi
+          [ -n "$GEMINI_API_KEY" ] || { echo "::error::GEMINI_API_KEY missing"; exit 1; }
           {
             printf 'GEMINI_API_KEY=%s\n' "$GEMINI_API_KEY"
-            if [ -n "$GEMINI_MODEL" ]; then printf 'GEMINI_MODEL=%s\n' "$GEMINI_MODEL"; fi
+            [ -z "$GEMINI_MODEL" ] || printf 'GEMINI_MODEL=%s\n' "$GEMINI_MODEL"
           } | ssh -o BatchMode=yes root@"$VPS_HOST" \
-            "cat > $DEPLOY_DIR/.env && chmod 600 $DEPLOY_DIR/.env"
+            "cat > '$DEPLOY_DIR/.env' && chmod 600 '$DEPLOY_DIR/.env'"
 
-      - name: Pull & restart
+      - name: Log in to GHCR on VPS
         env:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
           GHCR_USER: ${{ github.repository_owner }}
-          IMAGE_PREFIX: ${{ needs.build.outputs.image_prefix }}
         run: |
           GHCR_USER_LC=$(echo "$GHCR_USER" | tr '[:upper:]' '[:lower:]')
           TOKEN=$(printf '%s' "$GHCR_PAT" | tr -d '[:space:]')
-
-          if [ -z "$TOKEN" ]; then
-            echo "::error::GHCR_PAT is empty"; exit 1
-          fi
-
+          [ -n "$TOKEN" ] || { echo "::error::GHCR_PAT is empty"; exit 1; }
           printf '%s' "$TOKEN" | ssh -o BatchMode=yes root@"$VPS_HOST" \
             "docker login ghcr.io -u $GHCR_USER_LC --password-stdin" \
             || { echo "::error::GHCR login denied. Use a CLASSIC token with read:packages."; exit 1; }
 
+      - name: Check mhealth network exists
+        run: |
           ssh -o BatchMode=yes root@"$VPS_HOST" \
-            "cd $DEPLOY_DIR && \
-             export IMAGE_PREFIX=$IMAGE_PREFIX TAG=${{ github.sha }} && \
-             docker compose pull && \
-             docker compose up -d --force-recreate --remove-orphans && \
-             docker compose ps && \
-             docker image prune -f"
+            "docker network inspect mhealth_default >/dev/null" \
+            || { echo "::error::Network mhealth_default not found. Deploy the mhealth stack first."; exit 1; }
+
+      - name: Pull & restart
+        run: |
+          ssh -o BatchMode=yes -o ServerAliveInterval=30 root@"$VPS_HOST" \
+            bash -s -- "$DEPLOY_DIR" "$IMAGE_PREFIX" "$TAG" <<'REMOTE'
+          set -euo pipefail
+          cd "$1"
+          export IMAGE_PREFIX="$2" TAG="$3"
+
+          docker compose pull --quiet
+          docker compose up -d --force-recreate --remove-orphans
+          sleep 8
+          docker compose ps
+
+          if [ -n "$(docker compose ps --status exited --status restarting --status dead -q)" ]; then
+            echo "ERROR: a container is not running"
+            docker compose logs --tail=100
+            exit 1
+          fi
+
+          docker image prune -f
+          REMOTE

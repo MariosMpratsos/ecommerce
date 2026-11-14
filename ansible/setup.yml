@@ -5,6 +5,7 @@
 
   vars:
     deploy_dir: /root/ecommerce
+    proxy_container: ""   # name of the mhealth nginx container; empty = skip reload hook
 
   tasks:
     - name: Install required packages
@@ -13,6 +14,7 @@
           - ca-certificates
           - curl
           - git
+          - ufw
           - docker.io
           - docker-compose-v2
         state: present
@@ -33,3 +35,31 @@
       loop:
         - "{{ deploy_dir }}"
         - "{{ deploy_dir }}/data"
+
+    # SSH is allowed first so enabling ufw can't lock you out
+    - name: Allow SSH, HTTP and HTTPS
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: ["22", "80", "443"]
+
+    - name: Enable firewall
+      community.general.ufw:
+        state: enabled
+
+    - name: Ensure certbot deploy-hook directory exists
+      ansible.builtin.file:
+        path: /etc/letsencrypt/renewal-hooks/deploy
+        state: directory
+        mode: "0755"
+      when: proxy_container | length > 0
+
+    - name: Reload proxy after certificate renewal
+      ansible.builtin.copy:
+        dest: /etc/letsencrypt/renewal-hooks/deploy/reload-proxy.sh
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          docker exec {{ proxy_container }} nginx -s reload || true
+      when: proxy_container | length > 0

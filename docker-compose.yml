@@ -2,7 +2,7 @@ name: ecommerce-shop
 
 services:
   ecommerce-backend:
-    image: ghcr.io/mariosmpratsos/ecommerce-backend:latest
+    image: ${IMAGE_PREFIX:-ghcr.io/mariosmpratsos/ecommerce}-backend:${TAG:-latest}
     restart: unless-stopped
     env_file:
       - .env
@@ -13,7 +13,7 @@ services:
       - mhealth
 
   ecommerce-frontend:
-    image: ghcr.io/mariosmpratsos/ecommerce-frontend:latest
+    image: ${IMAGE_PREFIX:-ghcr.io/mariosmpratsos/ecommerce}-frontend:${TAG:-latest}
     restart: unless-stopped
     depends_on:
       - ecommerce-backend
